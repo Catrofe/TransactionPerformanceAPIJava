@@ -17,19 +17,47 @@ public class TransactionService {
     private final TransactionRepositoryPort transactionRepositoryPort;
 
     public void createTransaction(TransactionRequest transactionRequest) {
-        ArrayList<Transaction> transactions = new ArrayList<>();
-        for (int i = 0; i < transactionRequest.amountOfTransactions(); i++){
-            Transaction transaction = new Transaction();
-            transaction.setStockCode(transactionRequest.stockCode().get(new Random().nextInt(transactionRequest.stockCode().size())));
-            transactions.add(transaction);
+        int batchSize = generateBatchSize(transactionRequest.amountOfTransactions());
+        List<Thread> threads = new ArrayList<>();
+        for (int i = 0; i < transactionRequest.amountOfTransactions(); i += batchSize) {
+            if (i + batchSize > transactionRequest.amountOfTransactions()) {
+                int finalI = i;
+                Thread thread = new Thread(() -> generateAndSaveTransactions(transactionRequest.stockCode(), (transactionRequest.amountOfTransactions() - finalI)));
+                threads.add(thread);
+                thread.start();
+                continue;
+            }
+            Thread thread = new Thread(() -> generateAndSaveTransactions(transactionRequest.stockCode(), batchSize));
+            threads.add(thread);
+            thread.start();
         }
-        saveTransactions(transactions);
 
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
-
-
-    private void saveTransactions(List<Transaction> transactions) {
-        transactionRepositoryPort.saveAll(transactions);
+    private void generateAndSaveTransactions(List<String> stockCode, Integer batchSize){
+        ((Runnable) () -> {
+            List<Transaction> transactions = new ArrayList<>();
+            for (int i = 0; i < batchSize; i++) {
+                Transaction transaction = new Transaction();
+                transaction.setStockCode(stockCode.get(new Random().nextInt(stockCode.size())));
+                transactions.add(transaction);
+            }
+            transactionRepositoryPort.saveAll(transactions);
+        }).run();
     }
+
+    private int generateBatchSize(int amountOfTransactions){
+        if (amountOfTransactions >= 1000000){
+            return 50000;
+        }
+        return 10000;
+    }
+
 }
